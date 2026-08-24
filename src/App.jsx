@@ -516,13 +516,13 @@ const parseExitDatetime = (dateStr, timeStr) => {
     if (year > 2400) year -= 543;
     if (!isNaN(day) && !isNaN(month) && !isNaN(year)) {
       const d = new Date(year, month - 1, day, h, min, 0, 0);
-      if (h * 60 + min <= settings.workDayCutoffHour * 60) d.setDate(d.getDate() + 1);
+      if (h * 60 + min < settings.workDayCutoffHour * 60) d.setDate(d.getDate() + 1);
       return d;
     }
   }
   // ไม่มี date → fallback วันนี้ + ปรับข้ามคืน
   const d = new Date(); d.setHours(h, min, 0, 0);
-  if (h * 60 + min <= settings.workDayCutoffHour * 60) d.setDate(d.getDate() + 1);
+  if (h * 60 + min < settings.workDayCutoffHour * 60) d.setDate(d.getDate() + 1);
   return d;
 };
 
@@ -1026,7 +1026,7 @@ const displayDate = (dateStr, exitTime) => {
   if (!dateStr || !exitTime) return dateStr || "";
   const [hStr, minStr] = exitTime.split(":");
   const h = parseInt(hStr, 10); const min = parseInt(minStr, 10);
-  if (isNaN(h) || isNaN(min) || h * 60 + min > settings.workDayCutoffHour * 60) return dateStr;
+  if (isNaN(h) || isNaN(min) || h * 60 + min >= settings.workDayCutoffHour * 60) return dateStr;
   const parts = dateStr.split("/");
   if (parts.length !== 3) return dateStr;
   let [d, m, y] = parts.map(Number);
