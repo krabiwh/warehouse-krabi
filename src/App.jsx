@@ -5817,7 +5817,6 @@ export default function App() {
     { id: "waiting_summary", label: "ข้อมูลการรอสินค้า", icon: "clock" },
     { id: "overview_log",   label: "Log ภาพรวมการทำงาน",  icon: "list"  },
     { id: "work_tracking",  label: "Tracking การทำงาน",  icon: "chart" },
-    { id: "planning",      label: "Invoice",       icon: "plan"      },
     { id: "detail_loading", label: "อัพโหลด PO", icon: "clipboard" },
     { id: "download",       label: "จบการทำงาน",       icon: "invoice"   },
     { id: "admin",          label: "Admin",          icon: "plan"      },
