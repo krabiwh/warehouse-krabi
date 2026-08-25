@@ -42,7 +42,7 @@ import {
 // 4. QC ตรวจอุณหภูมิก่อนเข้าแต่ละลาน (ทีละลาน ไม่ต้องครบ 3 พร้อมกัน)
 // 5. ลานโหลด: QC ผ่านลานไหน → โหลดลานนั้นได้เลย (truck.qcLanes / truck.loadLanes)
 // 6. Picking พิมพ์สรุปค่าย (โหลดแล้วอย่างน้อย 1 ลาน) → status: "summary_printed"
-// 7. วางแผน ออก Invoice → status: "invoiced"
+// 7. Picking ออก Invoice → status: "invoiced"
 // ─────────────────────────────────────────────────────────────────────────────
 
 // ลาน 3 ลานของระบบ (lane_parts/lane_head/lane_pork) — label/สี/emoji มาจาก wh_lanes
@@ -1576,12 +1576,13 @@ const Picking = ({ trucks, queue, onUpdate, detailMapByChannel = {} }) => {
   ].sort((a, b) => {
     const rank = t => {
       if (!t) return 1;                          // รอเช็คอิน
-      if (t.summaryPrinted) return 3;            // เสร็จแล้ว → ล่าง
+      if (t.status === "invoiced") return 3;     // ออก Invoice แล้ว → ล่าง
       const can3 = t.status === "arrived";
       const can6 = t.status === "picking" &&
         lanes.some(l => t.loadLanes?.[l.id]?.done) &&
         !lanes.some(l => t.qcLanes?.[l.id]?.done && !t.loadLanes?.[l.id]?.done);
-      if (can3 || can6) return 0;                // กดได้เลย → บน
+      const canInvoice = t.status === "summary_printed";
+      if (can3 || can6 || canInvoice) return 0;  // กดได้เลย → บน
       return 2;                                  // รอขั้นตอนอื่น
     };
     return rank(a.truck) - rank(b.truck);
@@ -1714,6 +1715,22 @@ const Picking = ({ trucks, queue, onUpdate, detailMapByChannel = {} }) => {
     return <span style={{ color: "#d1d5db", fontSize: 12 }}>—</span>;
   };
 
+  const InvoiceCell = ({ truck }) => {
+    const [saving, setSaving] = useState(false);
+    if (!truck || !["summary_printed", "invoiced"].includes(truck.status)) return <span style={{ color: "#d1d5db", fontSize: 12 }}>—</span>;
+    if (truck.status === "invoiced") return <span style={{ color: "#10b981", fontWeight: 700, fontSize: 13 }}>✓</span>;
+    return (
+      <button onClick={async () => {
+        setSaving(true);
+        try { await onUpdate(truck.id, { invoiceDone: true, status: "invoiced", invoicedAt: TIME_NOW() }); }
+        catch (e) { alert("บันทึกไม่สำเร็จ: " + e.message); setSaving(false); }
+      }} disabled={saving}
+        style={{ background: "#111", color: "#fff", border: "none", borderRadius: 0, padding: "5px 8px", fontWeight: 700, fontSize: 11, cursor: "pointer", whiteSpace: "nowrap" }}>
+        {saving ? "⏳" : "ออก Invoice"}
+      </button>
+    );
+  };
+
   return (
     <div>
       <h2 style={{ margin: "0 0 18px", fontWeight: 900, fontSize: 22 }}>📦 ห้อง Picking</h2>
@@ -1735,7 +1752,7 @@ const Picking = ({ trucks, queue, onUpdate, detailMapByChannel = {} }) => {
                 <tr style={{ background: "#f9fafb" }}>
                   {(isMobile
                     ? ["ทะเบียน","ลาน","เวลา / สถานะ","Action"]
-                    : ["ทะเบียน","กลุ่มลูกค้า", ...lanes.map(l => l.tinyLabel), "เวลาเข้าโรงงาน","สถานะ","สถานะเพิ่มเติม","③ พิมพ์ใบเบิกสินค้า","⑥ พิมพ์ใบสรุปจ่าย"]
+                    : ["ทะเบียน","กลุ่มลูกค้า", ...lanes.map(l => l.tinyLabel), "เวลาเข้าโรงงาน","สถานะ","สถานะเพิ่มเติม","③ พิมพ์ใบเบิกสินค้า","⑥ พิมพ์ใบสรุปจ่าย","⑦ ใบ Invoice"]
                   ).map(h => (
                     <th key={h} style={{ padding: isMobile ? "7px 6px" : "9px 12px", textAlign: "left", fontWeight: 700, color: "#374151", whiteSpace: "nowrap", borderBottom: "1px solid #e5e7eb", background: "#f9fafb" }}>{h}</th>
                   ))}
@@ -1768,6 +1785,7 @@ const Picking = ({ trucks, queue, onUpdate, detailMapByChannel = {} }) => {
                         <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-start" }}>
                           <Step3Cell truck={truck} />
                           <Step6Cell truck={truck} />
+                          <InvoiceCell truck={truck} />
                         </div>
                       </td>
                     </tr>
@@ -1792,6 +1810,7 @@ const Picking = ({ trucks, queue, onUpdate, detailMapByChannel = {} }) => {
                       <td style={{ padding: "10px 12px" }}><ExtraStatusCell truck={truck} /></td>
                       <td style={{ padding: "10px 12px" }}><Step3Cell truck={truck} /></td>
                       <td style={{ padding: "10px 12px" }}><Step6Cell truck={truck} /></td>
+                      <td style={{ padding: "10px 12px" }}><InvoiceCell truck={truck} /></td>
                     </tr>
                   );
                 })}
@@ -3111,22 +3130,6 @@ const Planning = ({ trucks, queue, onUpdate }) => {
   const Tick = () => <span style={{ color: "#10b981", fontWeight: 700, fontSize: 13 }}>✓</span>;
   const Dash = () => <span style={{ color: "#d1d5db", fontSize: 12 }}>—</span>;
 
-  const InvoiceCell = ({ truck }) => {
-    const [saving, setSaving] = useState(false);
-    if (!truck || !["summary_printed", "invoiced"].includes(truck.status)) return <Dash />;
-    if (truck.status === "invoiced") return <Tick />;
-    return (
-      <button onClick={async () => {
-        setSaving(true);
-        try { await onUpdate(truck.id, { invoiceDone: true, status: "invoiced", invoicedAt: TIME_NOW() }); }
-        catch (e) { alert("บันทึกไม่สำเร็จ: " + e.message); setSaving(false); }
-      }} disabled={saving}
-        style={{ background: "#111", color: "#fff", border: "none", borderRadius: 0, padding: "5px 8px", fontWeight: 700, fontSize: 11, cursor: "pointer", whiteSpace: "nowrap" }}>
-        {saving ? "⏳" : "ออก Invoice"}
-      </button>
-    );
-  };
-
   return (
     <div>
       <h2 style={{ margin: "0 0 18px", fontWeight: 900, fontSize: 22 }}>📄 ห้องวางแผน</h2>
@@ -3142,7 +3145,7 @@ const Planning = ({ trucks, queue, onUpdate }) => {
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
               <thead style={{ position: "sticky", top: 0, zIndex: 10 }}>
                 <tr style={{ background: "#f9fafb" }}>
-                  {["ทะเบียน","กลุ่มลูกค้า","เวลาเข้าโรงงาน","สถานะ","③ ใบเบิกสินค้า","⑥ ใบสรุปจ่าย","⑦ ใบ Invoice"].map(h => (
+                  {["ทะเบียน","กลุ่มลูกค้า","เวลาเข้าโรงงาน","สถานะ","③ ใบเบิกสินค้า","⑥ ใบสรุปจ่าย"].map(h => (
                     <th key={h} style={{ padding: "9px 12px", textAlign: "left", fontWeight: 700, color: "#374151", whiteSpace: "nowrap", borderBottom: "1px solid #e5e7eb", background: "#f9fafb" }}>{h}</th>
                   ))}
                 </tr>
@@ -3198,7 +3201,6 @@ const Planning = ({ trucks, queue, onUpdate }) => {
                     </td>
                     <td style={{ padding: "10px 12px" }}>{truck?.pickupPrinted ? <Tick/> : <Dash/>}</td>
                     <td style={{ padding: "10px 12px" }}>{truck?.summaryPrinted ? <Tick/> : <Dash/>}</td>
-                    <td style={{ padding: "10px 12px" }}><InvoiceCell truck={truck} /></td>
                   </tr>
                 ))}
               </tbody>
@@ -5784,7 +5786,7 @@ export default function App() {
 
   const badge = {
     driver:        queue.filter(q => !trucks.find(t => t.queueId === q.id)).length,
-    picking:       trucks.filter(t => t.status === "arrived").length,
+    picking:       trucks.filter(t => ["arrived","summary_printed"].includes(t.status)).length,
     qc_parts:      trucks.filter(t => ["arrived","picking"].includes(t.status) && !t.qcLanes?.lane_parts?.done).length,
     qc_head:       trucks.filter(t => ["arrived","picking"].includes(t.status) && !t.qcLanes?.lane_head?.done).length,
     qc_pork:       trucks.filter(t => ["arrived","picking"].includes(t.status) && !t.qcLanes?.lane_pork?.done).length,
@@ -5794,7 +5796,6 @@ export default function App() {
     sample_parts:  trucks.filter(t => ["arrived","picking"].includes(t.status) && !t.sampleLanes?.lane_parts?.done).length,
     sample_head:   trucks.filter(t => ["arrived","picking"].includes(t.status) && !t.sampleLanes?.lane_head?.done).length,
     sample_pork:   trucks.filter(t => ["arrived","picking"].includes(t.status) && !t.sampleLanes?.lane_pork?.done).length,
-    planning:      trucks.filter(t => t.status === "summary_printed").length,
   };
 
   const tabs = [
