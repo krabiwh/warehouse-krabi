@@ -617,6 +617,11 @@ const exportArchiveExcel = async (dateStr) => {
 };
 
 const LANE_LABEL = { lane_parts: "ลานชิ้นส่วน", lane_head: "ลานหัว/เครื่องใน", lane_pork: "ลานหมูซีก" };
+const TAB_LANE = {
+  qc_parts: "lane_parts", qc_head: "lane_head", qc_pork: "lane_pork",
+  loading_parts: "lane_parts", loading_head: "lane_head", loading_pork: "lane_pork",
+  sample_parts: "lane_parts", sample_head: "lane_head", sample_pork: "lane_pork",
+};
 
 const TruckTable = ({ visibleRows, allRows, searchPlate, setSearchPlate, getRemMins, myPlate, simple = false }) => {
   const containerRef = useRef(null);
@@ -3814,19 +3819,35 @@ const DetailSourceSettings = () => {
 const LaneSettings = () => {
   const [rows, setRows] = useState(() => [...lanes]);
   const [busy, setBusy] = useState(null);
+  const [toggling, setToggling] = useState(null);
 
   const refresh = () => setRows([...lanes]);
   const editField = (id, key) => (e) => setRows(rs => rs.map(r => r.id === id ? { ...r, [key]: e.target.value } : r));
+  const fieldsOf = (row) => ({ label: row.label, shortLabel: row.shortLabel, tinyLabel: row.tinyLabel, emoji: row.emoji, color: row.color, bg: row.bg, border: row.border, sortOrder: row.sortOrder, enabled: row.enabled });
 
   const save = async (row) => {
     setBusy(row.id);
     try {
-      await saveLane(row.id, { label: row.label, shortLabel: row.shortLabel, tinyLabel: row.tinyLabel, emoji: row.emoji, color: row.color, bg: row.bg, border: row.border, sortOrder: row.sortOrder });
+      await saveLane(row.id, fieldsOf(row));
       refresh();
     } catch (e) {
       alert("บันทึกไม่สำเร็จ: " + e.message);
     } finally {
       setBusy(null);
+    }
+  };
+
+  const toggleEnabled = async (row, v) => {
+    setToggling(row.id);
+    setRows(rs => rs.map(r => r.id === row.id ? { ...r, enabled: v } : r));
+    try {
+      await saveLane(row.id, fieldsOf({ ...row, enabled: v }));
+      refresh();
+    } catch (e) {
+      alert("บันทึกไม่สำเร็จ: " + e.message);
+      setRows(rs => rs.map(r => r.id === row.id ? { ...r, enabled: row.enabled } : r));
+    } finally {
+      setToggling(null);
     }
   };
 
@@ -3836,10 +3857,10 @@ const LaneSettings = () => {
   return (
     <Collapsible title="🏭 ลานโหลด (Lanes)">
       <div style={{ fontSize: 11, color: "#9ca3af", marginBottom: 12 }}>
-        แก้ป้ายชื่อ/สี/emoji ของ 3 ลานได้ที่นี่ — รหัสลาน (id) เปลี่ยนไม่ได้เพราะผูกกับ QR/URL ที่พิมพ์ใช้งานอยู่แล้ว การเพิ่ม/ลดจำนวนลานต้องแก้โค้ดส่วน routing เพิ่มเติม
+        แก้ป้ายชื่อ/สี/emoji ของ 3 ลานได้ที่นี่ — รหัสลาน (id) เปลี่ยนไม่ได้เพราะผูกกับ QR/URL ที่พิมพ์ใช้งานอยู่แล้ว การเพิ่ม/ลดจำนวนลานต้องแก้โค้ดส่วน routing เพิ่มเติม ปิดใช้งานลานจะซ่อนลานนั้นจากเมนูเลือกลานของ QC/ลานโหลด/Checker (URL/QR เดิมยังเปิดเข้ามาได้แต่จะเจอข้อความแจ้งว่าลานปิดใช้งานอยู่)
       </div>
       {rows.map(r => (
-        <div key={r.id} style={{ display: "grid", gridTemplateColumns: "auto 1fr 1fr 1fr 56px auto", gap: 8, alignItems: "end", padding: "10px 0", borderBottom: "1px solid #f3f4f6" }}>
+        <div key={r.id} style={{ display: "grid", gridTemplateColumns: "auto 1fr 1fr 1fr 56px 56px auto", gap: 8, alignItems: "end", padding: "10px 0", borderBottom: "1px solid #f3f4f6" }}>
           <div>
             <label style={lbl}>id</label>
             <div style={{ fontSize: 12, color: "#9ca3af", padding: "9px 0" }}>{r.id}</div>
@@ -3859,6 +3880,12 @@ const LaneSettings = () => {
           <div>
             <label style={lbl}>สี</label>
             <input type="color" value={r.color} onChange={editField(r.id, "color")} style={{ ...inp, padding: 2, height: 38 }} />
+          </div>
+          <div>
+            <label style={lbl}>ใช้งาน</label>
+            <div style={{ padding: "9px 0" }}>
+              <Switch checked={r.enabled !== false} onChange={(v) => toggleEnabled(r, v)} disabled={toggling === r.id} />
+            </div>
           </div>
           <button onClick={() => save(r)} disabled={busy === r.id}
             style={{ background: busy === r.id ? "#e5e7eb" : "#111", color: busy === r.id ? "#9ca3af" : "#fff", border: "none", borderRadius: 0, padding: "9px 14px", fontWeight: 700, fontSize: 13, cursor: busy === r.id ? "default" : "pointer", whiteSpace: "nowrap" }}>
@@ -5837,7 +5864,24 @@ export default function App() {
     || isSamplePartsMode || isSampleHeadMode || isSamplePorkMode
     || isDashboardTransportMode;
   const allowedTabIds = ROLE_TABS[role] || null;
-  const visibleTabs = allowedTabIds ? tabs.filter(t => allowedTabIds.includes(t.id)) : tabs;
+  const laneEnabled = (laneId) => (lanes.find(l => l.id === laneId)?.enabled ?? true);
+  const isTabLaneEnabled = (tabId) => {
+    const laneId = TAB_LANE[tabId];
+    return laneId ? laneEnabled(laneId) : true;
+  };
+  const visibleTabs = (allowedTabIds ? tabs.filter(t => allowedTabIds.includes(t.id)) : tabs).filter(t => isTabLaneEnabled(t.id));
+
+  // ── ลานปิดใช้งานอยู่ (เข้าผ่าน URL/QR เดิม) ──
+  const LaneDisabledNotice = ({ title, color }) => (
+    <div style={{ minHeight: "100vh", background: "#f1f5f9", fontFamily: "'Sarabun','Noto Sans Thai',sans-serif" }}>
+      <KioskHeader emoji="🚫" title={title} color={color} />
+      <div style={{ maxWidth: 480, margin: "60px auto", padding: "20px 14px", textAlign: "center", background: "#fff", border: "1px solid #e5e7eb" }}>
+        <div style={{ fontSize: 40, marginBottom: 12 }}>🚫</div>
+        <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 6 }}>ลานนี้ปิดใช้งานอยู่</div>
+        <div style={{ fontSize: 13, color: "#6b7280" }}>กรุณาติดต่อผู้ดูแลระบบหากต้องการเปิดใช้งานลานนี้อีกครั้ง</div>
+      </div>
+    </div>
+  );
 
   // ── Role select (เลือกตำแหน่งงานก่อนเข้าระบบ) ──
   if (!isKioskMode && !role) {
@@ -5876,6 +5920,7 @@ export default function App() {
 
   // ── QC kiosk modes ──
   if (isQcPartsMode) {
+    if (!laneEnabled("lane_parts")) return <LaneDisabledNotice title="ลานโหลด ชิ้นส่วน" color="#0369a1" />;
     return (
       <div style={{ minHeight: "100vh", background: "#f1f5f9", fontFamily: "'Sarabun','Noto Sans Thai',sans-serif" }}>
         <KioskHeader emoji="🌡️" title="ลานโหลด ชิ้นส่วน" color="#0369a1" />
@@ -5887,6 +5932,7 @@ export default function App() {
   }
 
   if (isQcHeadMode) {
+    if (!laneEnabled("lane_head")) return <LaneDisabledNotice title="ลานโหลด หัว/เครื่องใน" color="#0369a1" />;
     return (
       <div style={{ minHeight: "100vh", background: "#f1f5f9", fontFamily: "'Sarabun','Noto Sans Thai',sans-serif" }}>
         <KioskHeader emoji="🌡️" title="ลานโหลด หัว/เครื่องใน" color="#0369a1" />
@@ -5898,6 +5944,7 @@ export default function App() {
   }
 
   if (isQcPorkMode) {
+    if (!laneEnabled("lane_pork")) return <LaneDisabledNotice title="ลานโหลด หมูซีก" color="#0369a1" />;
     return (
       <div style={{ minHeight: "100vh", background: "#f1f5f9", fontFamily: "'Sarabun','Noto Sans Thai',sans-serif" }}>
         <KioskHeader emoji="🌡️" title="ลานโหลด หมูซีก" color="#0369a1" />
@@ -5910,6 +5957,7 @@ export default function App() {
 
   // ── Loading lane kiosk modes ──
   if (isLoadingPartsMode) {
+    if (!laneEnabled("lane_parts")) return <LaneDisabledNotice title="Checker ลานโหลดชิ้นส่วน" color="#c2410c" />;
     return (
       <div style={{ minHeight: "100vh", background: "#f1f5f9", fontFamily: "'Sarabun','Noto Sans Thai',sans-serif" }}>
         <KioskHeader emoji="🥩" title="Checker ลานโหลดชิ้นส่วน" color="#c2410c" />
@@ -5921,6 +5969,7 @@ export default function App() {
   }
 
   if (isLoadingHeadMode) {
+    if (!laneEnabled("lane_head")) return <LaneDisabledNotice title="Checker ลานโหลดหัว/เครื่องใน" color="#7c3aed" />;
     return (
       <div style={{ minHeight: "100vh", background: "#f1f5f9", fontFamily: "'Sarabun','Noto Sans Thai',sans-serif" }}>
         <KioskHeader emoji="🐷" title="Checker ลานโหลดหัว/เครื่องใน" color="#7c3aed" />
@@ -5932,6 +5981,7 @@ export default function App() {
   }
 
   if (isLoadingPorkMode) {
+    if (!laneEnabled("lane_pork")) return <LaneDisabledNotice title="Checker ลานโหลดหมูซีก" color="#be123c" />;
     return (
       <div style={{ minHeight: "100vh", background: "#f1f5f9", fontFamily: "'Sarabun','Noto Sans Thai',sans-serif" }}>
         <KioskHeader emoji="🐖" title="Checker ลานโหลดหมูซีก" color="#be123c" />
@@ -5944,6 +5994,7 @@ export default function App() {
 
   // ── Random sample temp-check kiosk modes ──
   if (isSamplePartsMode) {
+    if (!laneEnabled("lane_parts")) return <LaneDisabledNotice title="QC ชิ้นส่วน" color="#0d9488" />;
     return (
       <div style={{ minHeight: "100vh", background: "#f1f5f9", fontFamily: "'Sarabun','Noto Sans Thai',sans-serif" }}>
         <KioskHeader emoji="📷" title="QC ชิ้นส่วน" color="#0d9488" />
@@ -5955,6 +6006,7 @@ export default function App() {
   }
 
   if (isSampleHeadMode) {
+    if (!laneEnabled("lane_head")) return <LaneDisabledNotice title="QC หัว/เครื่องใน" color="#0d9488" />;
     return (
       <div style={{ minHeight: "100vh", background: "#f1f5f9", fontFamily: "'Sarabun','Noto Sans Thai',sans-serif" }}>
         <KioskHeader emoji="📷" title="QC หัว/เครื่องใน" color="#0d9488" />
@@ -5966,6 +6018,7 @@ export default function App() {
   }
 
   if (isSamplePorkMode) {
+    if (!laneEnabled("lane_pork")) return <LaneDisabledNotice title="QC หมูซีก" color="#0d9488" />;
     return (
       <div style={{ minHeight: "100vh", background: "#f1f5f9", fontFamily: "'Sarabun','Noto Sans Thai',sans-serif" }}>
         <KioskHeader emoji="📷" title="QC หมูซีก" color="#0d9488" />

@@ -4,7 +4,7 @@
 --
 -- id = lane_parts | lane_head | lane_pork (ต้องตรงกับ id ที่โค้ดรู้จักเท่านั้น
 -- ไม่งั้นแถวนั้นจะไม่ผูกกับ kiosk routing ที่มีอยู่แล้ว)
--- data = { label, shortLabel, tinyLabel, emoji, color, bg, border, sortOrder }
+-- data = { label, shortLabel, tinyLabel, emoji, color, bg, border, sortOrder, enabled }
 -- ไม่ต้องมีข้อมูลในตารางนี้ก็ได้ — แอปจะ fallback ไปใช้ค่า default ในโค้ด
 -- ============================================================
 
