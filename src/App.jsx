@@ -3673,8 +3673,12 @@ const BasketTypeSettings = () => {
     }
   };
 
+  const DEFAULT_BASKET_KEYS = ["yellowBig", "yellowSmall", "gray", "hooks"];
   const remove = async (b) => {
-    if (!window.confirm(`ลบประเภท "${b.label}"? ถ้าเคยมีรถบันทึกข้อมูลด้วยประเภทนี้ไว้ ข้อมูลจะยังอยู่ในฐานข้อมูลแต่จะไม่แสดงในหน้าเว็บอีก`)) return;
+    const warn = DEFAULT_BASKET_KEYS.includes(b.key)
+      ? `ลบประเภท "${b.label}"? เป็นประเภท default ของระบบ — ถ้าลบแล้วจะไม่แสดงในหน้าเว็บอีก (เพิ่มกลับได้ทีหลังโดยเพิ่มประเภทใหม่ด้วยรหัส "${b.key}" เดิม) ถ้าเคยมีรถบันทึกข้อมูลด้วยประเภทนี้ไว้ ข้อมูลจะยังอยู่ในฐานข้อมูล`
+      : `ลบประเภท "${b.label}"? ถ้าเคยมีรถบันทึกข้อมูลด้วยประเภทนี้ไว้ ข้อมูลจะยังอยู่ในฐานข้อมูลแต่จะไม่แสดงในหน้าเว็บอีก`;
+    if (!window.confirm(warn)) return;
     try {
       await deleteBasketType(b.key);
       refresh();
@@ -3688,15 +3692,13 @@ const BasketTypeSettings = () => {
 
   return (
     <Collapsible title="🧺 ประเภทตะกร้า/ตะขอ">
-      <div style={{ fontSize: 11, color: "#9ca3af", marginBottom: 12 }}>4 ตัวแรก (เหลืองใหญ่/เล็ก, เทา, ตะขอ) เป็น default ในระบบ ลบไม่ได้ — เพิ่มประเภทใหม่ได้ที่นี่ แต่ห้ามเปลี่ยน/ลบ "รหัส (key)" ที่มีข้อมูลบันทึกไว้แล้ว</div>
+      <div style={{ fontSize: 11, color: "#9ca3af", marginBottom: 12 }}>4 ตัวแรก (เหลืองใหญ่/เล็ก, เทา, ตะขอ) เป็น default ในระบบ ลบได้เช่นกัน (จะซ่อนจากหน้าเว็บ เพิ่มกลับได้ทีหลังด้วยรหัสเดิม) — เพิ่มประเภทใหม่ได้ที่นี่ แต่ห้ามเปลี่ยน/ลบ "รหัส (key)" ที่มีข้อมูลบันทึกไว้แล้ว</div>
       {rows.length > 0 && (
         <div style={{ marginBottom: 12 }}>
           {rows.map(b => (
             <div key={b.key} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 0", borderBottom: "1px solid #f3f4f6", fontSize: 13 }}>
               <span>{b.label} <span style={{ color: "#9ca3af", fontSize: 11 }}>({b.key}{b.countsInTotal ? ", นับรวมในรวมตะกร้า" : ""})</span></span>
-              {!["yellowBig", "yellowSmall", "gray", "hooks"].includes(b.key) && (
-                <button onClick={() => remove(b)} style={{ background: "none", border: "none", color: "#dc2626", cursor: "pointer", fontSize: 13 }}>🗑️ ลบ</button>
-              )}
+              <button onClick={() => remove(b)} style={{ background: "none", border: "none", color: "#dc2626", cursor: "pointer", fontSize: 13 }}>🗑️ ลบ</button>
             </div>
           ))}
         </div>

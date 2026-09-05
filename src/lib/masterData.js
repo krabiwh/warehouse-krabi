@@ -89,14 +89,19 @@ export async function loadBasketTypes() {
     const { data, error } = await supabase.from("wh_basket_types").select("id, data")
     if (error) throw error
     const merged = [...DEFAULT_BASKET_TYPES]
+    const hiddenKeys = new Set()
     for (const row of data || []) {
+      // hidden = ประเภทนี้ถูกลบออกจากหน้าเว็บ (แม้เป็น 1 ใน 4 default ในโค้ดที่ลบออกจาก
+      // โค้ดจริงๆ ไม่ได้ ก็ซ่อนด้วย flag นี้แทน) — ข้อมูลเก่าที่เคยบันทึกด้วย key นี้ยังอยู่ครบ
+      if (row.data?.hidden) { hiddenKeys.add(row.id); continue }
       const entry = { key: row.id, label: row.data?.label || row.id, countsInTotal: !!row.data?.countsInTotal, sortOrder: row.data?.sortOrder ?? 0 }
       const idx = merged.findIndex(b => b.key === entry.key)
       if (idx >= 0) merged[idx] = entry; else merged.push(entry)
     }
-    merged.sort((a, b) => a.sortOrder - b.sortOrder)
+    const visible = merged.filter(b => !hiddenKeys.has(b.key))
+    visible.sort((a, b) => a.sortOrder - b.sortOrder)
     basketTypes.length = 0
-    basketTypes.push(...merged)
+    basketTypes.push(...visible)
   } catch (e) {
     console.error("โหลด wh_basket_types ไม่สำเร็จ ใช้ default ในโค้ดไปก่อน:", e)
   }
@@ -113,13 +118,21 @@ export async function saveBasketType(key, label, countsInTotal) {
   if (idx >= 0) basketTypes[idx] = row; else basketTypes.push(row)
 }
 
-// ลบได้เฉพาะประเภทที่เพิ่มเองใหม่ (ไม่ใช่ 4 ตัว default ในโค้ด) — ถ้าเคยมีรถบันทึกข้อมูล
-// ด้วย key นี้ไว้แล้ว ข้อมูลนั้นจะยังอยู่ในฐานข้อมูลแต่จะไม่แสดง/นับรวมในหน้าเว็บอีก
+// ลบได้ทุกประเภท รวมทั้ง 4 ตัว default ในโค้ด — ตัว default ลบออกจากโค้ดจริงไม่ได้ (จะ
+// กลับมาทุกครั้งที่ loadBasketTypes ทำงาน) จึง "ซ่อน" ด้วย flag hidden ในแถวเดิมแทนการ
+// ลบแถวทิ้ง ส่วนประเภทที่เพิ่มเองยังคงลบแถวทิ้งตรงๆ ได้ตามเดิม — ถ้าเคยมีรถบันทึกข้อมูล
+// ด้วย key นี้ไว้แล้ว ข้อมูลนั้นจะยังอยู่ในฐานข้อมูลแต่จะไม่แสดง/นับรวมในหน้าเว็บอีกทั้งคู่
 export async function deleteBasketType(key) {
-  const { error } = await supabase.from("wh_basket_types").delete().eq("id", key)
-  if (error) throw error
+  const isDefault = DEFAULT_BASKET_TYPES.some(b => b.key === key)
+  if (isDefault) {
+    const { error } = await supabase.from("wh_basket_types").upsert({ id: key, data: { hidden: true } })
+    if (error) throw error
+  } else {
+    const { error } = await supabase.from("wh_basket_types").delete().eq("id", key)
+    if (error) throw error
+  }
   const idx = basketTypes.findIndex(b => b.key === key)
-  if (idx >= 0 && !DEFAULT_BASKET_TYPES.some(b => b.key === key)) basketTypes.splice(idx, 1)
+  if (idx >= 0) basketTypes.splice(idx, 1)
 }
 
 // ── PO detail sources / channels (wh_detail_sources) ────────────────────────
