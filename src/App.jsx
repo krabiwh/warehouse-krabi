@@ -907,9 +907,29 @@ const Dashboard = ({ trucks, queue, onReset, lane, detailMap, title, myPlate, si
     return { key: q.id, date: q.date || "", plate: q.plate, customerGroup: q.customerGroup, entryTime: q.entryTime, exitTime: q.exitTime, truck, assignedLanes: laneMatchForTruck(truck, detailMap) };
   });
   const walkIns = trucks.filter(t => !usedDash.has(t.id));
+
+  // ทะเบียนที่เจอในไฟล์ PO (ตลาดสด/Makro/LOTUS) ที่จับคู่ลานได้แล้ว แต่ยังไม่มีคิว LG
+  // และยังไม่เคย scan เข้าโรงงาน — โชว์ไว้ล่วงหน้าด้วยเวลาเข้า/ออกว่าง แทนที่จะไม่แสดงเลย
+  // จนกว่าจะมีคิวหรือ check-in (ดู outOfQueuePlates ในหน้า "อัพโหลด PO")
+  const knownPlateNums = new Set([...queue, ...trucks].map(r => plateNum(r.plate)).filter(Boolean));
+  const seenPoPlate = new Set();
+  const poOnlyRows = [];
+  for (const ch of Object.keys(detailMap || {})) {
+    for (const plateKey of Object.keys(detailMap[ch] || {})) {
+      const n = plateNum(plateKey);
+      if (!n || knownPlateNums.has(n) || seenPoPlate.has(n)) continue;
+      seenPoPlate.add(n);
+      poOnlyRows.push({
+        key: `PO-${plateKey}`, date: "", plate: plateKey, customerGroup: "–", entryTime: "", exitTime: "",
+        truck: undefined, assignedLanes: laneMatchForTruck({ plate: plateKey, customerGroup: "" }, detailMap),
+      });
+    }
+  }
+
   const allRows = [
     ...dashQueueRows,
     ...walkIns.map(t => ({ key: t.id, date: t.date || "", plate: t.plate, customerGroup: t.customerGroup || "–", entryTime: t.entryTime || "", exitTime: t.exitTime || "", truck: t, assignedLanes: laneMatchForTruck(t, detailMap) })),
+    ...poOnlyRows,
   ].filter(row => !settings.excludedCustomerGroups.includes(row.customerGroup))
   // on a lane-specific tab: hide trucks confirmed (matched against PO/master data) to use a
   // *different* lane; keep unmatched trucks (assignedLanes empty — not known yet) visible on
