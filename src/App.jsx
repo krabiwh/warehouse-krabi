@@ -5490,13 +5490,6 @@ const WorkTracking = ({ trucks, queue, detailMapByChannel = {}, masterLane = [] 
       {loadingArchive && <div style={{ textAlign: "center", color: "#9ca3af", padding: 40 }}>กำลังโหลด...</div>}
 
       {!loadingArchive && (
-        <div style={{ marginBottom: 8 }}>
-          <input type="text" placeholder="🔍 ค้นหาทะเบียน..." value={searchPlate} onChange={e => setSearchPlate(e.target.value)}
-            style={{ border: "1.5px solid #d1d5db", borderRadius: 0, padding: "7px 11px", fontSize: 13, outline: "none", width: 200 }} />
-        </div>
-      )}
-
-      {!loadingArchive && (
         <div style={{ overflowX: "auto", boxShadow: "0 4px 16px rgba(0,0,0,0.12)", borderRadius: 0 }}>
           <table style={{ borderCollapse: "collapse", minWidth: 980, width: "100%", fontSize: 12 }}>
             <thead>
@@ -5504,8 +5497,14 @@ const WorkTracking = ({ trucks, queue, detailMapByChannel = {}, masterLane = [] 
               <tr>
                 {WT_GROUPS.map(g => (
                   <th key={g.id} colSpan={g.span}
-                    style={{ ...thBase, background: g.dark, color: "#fff", fontSize: 11, textAlign: "center", padding: "9px 10px", borderBottom: "1px solid rgba(255,255,255,0.12)" }}>
-                    {g.label}
+                    style={{ ...thBase, background: g.dark, color: "#fff", fontSize: 11, textAlign: "center", padding: g.id === "info" ? "6px 10px" : "9px 10px", borderBottom: "1px solid rgba(255,255,255,0.12)" }}>
+                    {g.id === "info"
+                      ? <>
+                          <style>{`.wt-search::placeholder { color: rgba(255,255,255,0.6); }`}</style>
+                          <input className="wt-search" type="text" placeholder="🔍 ค้นหาทะเบียน..." value={searchPlate} onChange={e => setSearchPlate(e.target.value)}
+                            style={{ border: "1px solid rgba(255,255,255,0.3)", borderRadius: 0, padding: "5px 10px", fontSize: 12, outline: "none", width: "100%", boxSizing: "border-box", background: "rgba(255,255,255,0.08)", color: "#fff" }} />
+                        </>
+                      : g.label}
                   </th>
                 ))}
               </tr>
