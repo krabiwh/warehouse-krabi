@@ -4464,7 +4464,7 @@ const laneMatchForTruck = (truck, detailMapByChannel) => {
 
 const DETAIL_LS_VER = "v2"; // bump when encoding/format changes — forces re-upload
 
-const DetailLoading = ({ masterLane, queue, onDetailChange }) => {
+const DetailLoading = ({ masterLane, queue, detailMapByChannel, onDetailChange }) => {
   // cache แคชไว้ต่อ "วันทำงาน" (คัดตาม cycleDateStr, ตัดรอบ 10:00 น. เดียวกับที่อื่น) —
   // ไม่งั้นถ้ายังไม่มีใครอัปโหลดไฟล์ PO ของวันใหม่ หน้านี้จะดึง localStorage ของเมื่อวานมาโชว์
   // ปนกับของวันนี้แทนที่จะว่างรอไฟล์ใหม่
@@ -4639,16 +4639,23 @@ const DetailLoading = ({ masterLane, queue, onDetailChange }) => {
     (queue || []).forEach(q => { const n = plateNum(q.plate); if (n) set.add(n); });
     return set;
   }, [queue]);
-  const { inQueueMap, outOfQueuePlates } = useMemo(() => {
-    const inQ = {};
+  const outOfQueuePlates = useMemo(() => {
     const outPlates = [];
-    for (const [plate, laneSet] of Object.entries(plateLaneMap)) {
+    for (const plate of Object.keys(plateLaneMap)) {
       const n = plateNum(plate);
-      if (queuePlateNums.size === 0 || (n && queuePlateNums.has(n))) inQ[plate] = laneSet;
-      else outPlates.push(plate);
+      if (queuePlateNums.size > 0 && !(n && queuePlateNums.has(n))) outPlates.push(plate);
     }
-    return { inQueueMap: inQ, outOfQueuePlates: outPlates };
+    return outPlates;
   }, [plateLaneMap, queuePlateNums]);
+
+  // ต่อ "คิวโหลด" (1 แถวคิว = 1 แถวในตาราง) ไม่ใช่ต่อทะเบียนแบบเดิม — ทะเบียนที่วิ่ง 2 เที่ยว
+  // ในคืนเดียวกัน (เช่น ไปส่งของ 2 รอบให้คนละกลุ่มลูกค้า) ก่อนหน้านี้ถูกรวมเป็นแถวเดียวกัน ทำให้
+  // รอบที่ 2 ไม่มีแถวให้ทำงานต่อ — laneMatchForTruck สโคปตามกลุ่มลูกค้า (channel) ของคิวนั้นๆ
+  // อยู่แล้ว จึงแยกลานของแต่ละเที่ยวออกจากกันถูกต้องโดยอัตโนมัติเมื่อกลุ่มลูกค้าต่างกัน
+  const tripRows = useMemo(
+    () => (queue || []).map(q => ({ key: q.id, plate: q.plate, assignedLanes: laneMatchForTruck(q, detailMapByChannel || {}) })),
+    [queue, detailMapByChannel]
+  );
 
   return (
     <div style={{ padding: 20 }}>
@@ -4680,12 +4687,12 @@ const DetailLoading = ({ masterLane, queue, onDetailChange }) => {
         ))}
       </div>
 
-      {/* Result table: plate → lanes (เฉพาะทะเบียนที่ตรงกับคิว LG) */}
-      {Object.keys(inQueueMap).length > 0 && (
+      {/* Result table: 1 แถวต่อ 1 คิวโหลด (ไม่ dedup ตามทะเบียน — ทะเบียนวิ่ง 2 เที่ยวได้ 2 แถว) */}
+      {tripRows.length > 0 && (
         <div style={{ background: "#fff", borderRadius: 0, boxShadow: "0 2px 12px rgba(0,0,0,0.08)", overflow: "hidden" }}>
           <div style={{ padding: "14px 20px", borderBottom: "1px solid #f3f4f6", fontWeight: 700, fontSize: 14 }}>
             📊 สรุป ทะเบียนรถ → ลานโหลด
-            <span style={{ background: "#111", color: "#fff", borderRadius: 0, padding: "2px 8px", fontSize: 11, marginLeft: 8 }}>{Object.keys(inQueueMap).length} คัน</span>
+            <span style={{ background: "#111", color: "#fff", borderRadius: 0, padding: "2px 8px", fontSize: 11, marginLeft: 8 }}>{tripRows.length} คิว</span>
           </div>
           <div style={{ overflowX: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
@@ -4697,12 +4704,12 @@ const DetailLoading = ({ masterLane, queue, onDetailChange }) => {
                 </tr>
               </thead>
               <tbody>
-                {Object.entries(inQueueMap).map(([plate, plateLanes]) => (
-                  <tr key={plate} style={{ borderBottom: "1px solid #f3f4f6" }}>
+                {tripRows.map(({ key, plate, assignedLanes }) => (
+                  <tr key={key} style={{ borderBottom: "1px solid #f3f4f6" }}>
                     <td style={{ padding: "8px 16px", fontWeight: 800, fontFamily: "monospace" }}>{plate}</td>
                     {lanes.map(l => (
                       <td key={l.id} style={{ padding: "8px 16px", textAlign: "center" }}>
-                        {plateLanes.has(l.id)
+                        {assignedLanes.has(l.id)
                           ? <span style={{ color: l.color, fontWeight: 800, fontSize: 16 }}>✓</span>
                           : <span style={{ color: "#e5e7eb", fontSize: 14 }}>—</span>
                         }
@@ -6173,7 +6180,7 @@ export default function App() {
         {tab === "work_tracking" && <WorkTracking trucks={trucks} queue={queue} detailMapByChannel={detailMapByChannel} masterLane={masterLane} />}
         {tab === "planning"      && <Planning trucks={trucks} queue={queue} onUpdate={handleUpdate} />}
         {tab === "master_upload" && <MasterUpload masterLane={masterLane} onMasterChange={handleMasterChange} />}
-        {tab === "detail_loading" && <DetailLoading masterLane={masterLane} queue={queue} onDetailChange={handleDetailChange} />}
+        {tab === "detail_loading" && <DetailLoading masterLane={masterLane} queue={queue} detailMapByChannel={detailMapByChannel} onDetailChange={handleDetailChange} />}
         {tab === "download"       && <Download onReset={handleReset} />}
         {tab === "admin"          && <Admin trucks={trucks} queue={queue} onUpdate={handleUpdate} onDeleteTruck={handleDeleteTruck} />}
       </div>
