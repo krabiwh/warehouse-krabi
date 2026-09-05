@@ -5220,6 +5220,7 @@ const WorkTracking = ({ trucks, queue, detailMapByChannel = {}, masterLane = [] 
   const [histDetailMapByChannel, setHistDetailMapByChannel] = useState(null); // for a past date being viewed
   const [sortCol, setSortCol] = useState("arrivedAt");
   const [sortDir, setSortDir] = useState(1);
+  const [searchPlate, setSearchPlate] = useState("");
 
   // วันปัจจุบัน → ใช้ detailMap สด, วันย้อนหลัง → ดึงไฟล์ PO ของวันนั้นมาคำนวณใหม่
   // (Master ลานโหลดไม่ได้เก็บย้อนหลัง จึงใช้ตัวปัจจุบันร่วมกับไฟล์ PO ของวันที่ดู)
@@ -5325,6 +5326,9 @@ const WorkTracking = ({ trucks, queue, detailMapByChannel = {}, masterLane = [] 
     const va = sortVal(a, sortCol), vb = sortVal(b, sortCol);
     return va < vb ? -sortDir : va > vb ? sortDir : 0;
   });
+  const visibleRows = searchPlate.trim()
+    ? sorted.filter(t => t.plate?.toLowerCase().includes(searchPlate.trim().toLowerCase()))
+    : sorted;
 
   const thBase = { padding: "7px 10px", fontWeight: 700, whiteSpace: "nowrap", userSelect: "none", borderRight: "1px solid rgba(255,255,255,0.18)" };
 
@@ -5486,6 +5490,13 @@ const WorkTracking = ({ trucks, queue, detailMapByChannel = {}, masterLane = [] 
       {loadingArchive && <div style={{ textAlign: "center", color: "#9ca3af", padding: 40 }}>กำลังโหลด...</div>}
 
       {!loadingArchive && (
+        <div style={{ marginBottom: 8 }}>
+          <input type="text" placeholder="🔍 ค้นหาทะเบียน..." value={searchPlate} onChange={e => setSearchPlate(e.target.value)}
+            style={{ border: "1.5px solid #d1d5db", borderRadius: 0, padding: "7px 11px", fontSize: 13, outline: "none", width: 200 }} />
+        </div>
+      )}
+
+      {!loadingArchive && (
         <div style={{ overflowX: "auto", boxShadow: "0 4px 16px rgba(0,0,0,0.12)", borderRadius: 0 }}>
           <table style={{ borderCollapse: "collapse", minWidth: 980, width: "100%", fontSize: 12 }}>
             <thead>
@@ -5513,10 +5524,12 @@ const WorkTracking = ({ trucks, queue, detailMapByChannel = {}, masterLane = [] 
               </tr>
             </thead>
             <tbody>
-              {sorted.length === 0 && (
-                <tr><td colSpan={COLS.length} style={{ textAlign: "center", color: "#9ca3af", padding: 40, background: "#fff" }}>ยังไม่มีข้อมูลในวันนี้</td></tr>
+              {visibleRows.length === 0 && (
+                <tr><td colSpan={COLS.length} style={{ textAlign: "center", color: "#9ca3af", padding: 40, background: "#fff" }}>
+                  {searchPlate.trim() ? `ไม่พบทะเบียน "${searchPlate}"` : "ยังไม่มีข้อมูลในวันนี้"}
+                </td></tr>
               )}
-              {sorted.map((t, i) => {
+              {visibleRows.map((t, i) => {
                 const q = getQ(t);
                 const stdDiff = q?.entryTime && t.arrivedAt ? workTimeValue(t.arrivedAt) - workTimeValue(q.entryTime) : null;
                 return (
