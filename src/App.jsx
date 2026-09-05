@@ -1041,7 +1041,7 @@ const displayDate = (dateStr, exitTime) => {
   return `${dt.getDate()}/${dt.getMonth() + 1}/${dt.getFullYear()}`;
 };
 
-const LGUpload = ({ queue, onSetQueue }) => {
+const LGUpload = ({ queue, trucks, onSetQueue }) => {
   const isMobile = useIsMobile();
   const [fileName, setFileName] = useState("");
   const [status,   setStatus]   = useState("idle"); // idle | preview | uploading | done | error
@@ -1095,6 +1095,26 @@ const LGUpload = ({ queue, onSetQueue }) => {
   };
 
   const inputStyle = { border: "1px solid #d1d5db", borderRadius: 0, padding: "4px 8px", fontSize: 12, width: "100%", boxSizing: "border-box" };
+
+  // นับให้ตรงกับ Dashboard: รวมรถ walk-in (scan เข้าโรงงานแต่ไม่ตรงกับคิวที่อัพโหลด)
+  // และตัดกลุ่มลูกค้าที่อยู่ใน excludedCustomerGroups ออก เหมือนที่ Dashboard ทำ
+  const combinedRows = useMemo(() => {
+    const plateNum = s => (String(s).match(/\d+/g) || []).pop() || "";
+    const used = new Set();
+    queue.forEach(q => {
+      let t = trucks.find(t => t.queueId === q.id && !used.has(t.id));
+      if (!t) t = trucks.find(t => !t.queueId && plateNum(t.plate) === plateNum(q.plate) && plateNum(q.plate) !== "" && !used.has(t.id));
+      if (t) used.add(t.id);
+    });
+    const walkIns = trucks.filter(t => !used.has(t.id));
+    return [
+      ...queue.map(q => ({ ...q, isWalkIn: false })),
+      ...walkIns.map(t => ({
+        id: t.id, date: t.date || "", plate: t.plate, customerGroup: t.customerGroup || "–",
+        zone: "", entryTime: t.entryTime || "", exitTime: t.exitTime || "", isWalkIn: true,
+      })),
+    ].filter(row => !settings.excludedCustomerGroups.includes(row.customerGroup));
+  }, [queue, trucks]);
 
   const handleFile = (e) => {
     const file = e.target.files[0];
@@ -1254,8 +1274,8 @@ const LGUpload = ({ queue, onSetQueue }) => {
       )}
 
       {/* Current queue list */}
-      {queue.length > 0 && (() => {
-        const filteredQueue = queue.filter(q => q.plate.includes(searchQuery));
+      {combinedRows.length > 0 && (() => {
+        const filteredQueue = combinedRows.filter(q => q.plate.includes(searchQuery));
         return (
         <div style={{ background: "#fff", borderRadius: 0, boxShadow: "0 2px 8px rgba(0,0,0,0.07)", overflow: "hidden" }}>
           <div style={{ padding: "14px 20px", borderBottom: "1px solid #f3f4f6", display: "flex", flexWrap: "wrap", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
@@ -1277,7 +1297,9 @@ const LGUpload = ({ queue, onSetQueue }) => {
               <tbody>
                 {filteredQueue.map(q => {
                   const isEditing = editId === q.id;
-                  const actions = isEditing ? (
+                  const actions = q.isWalkIn ? (
+                    <span style={{ background: "#fef3c7", color: "#92400e", borderRadius: 0, padding: "3px 8px", fontSize: 10, fontWeight: 700, whiteSpace: "nowrap" }}>🚶 Walk-in</span>
+                  ) : isEditing ? (
                     <div style={{ display: "flex", gap: 4 }}>
                       <button onClick={saveEdit} disabled={queueSaving} style={{ background: "#10b981", color: "#fff", border: "none", borderRadius: 0, padding: "4px 10px", fontSize: 11, fontWeight: 700, cursor: "pointer" }}>{queueSaving ? "..." : "บันทึก"}</button>
                       <button onClick={cancelEdit} disabled={queueSaving} style={{ background: "#f3f4f6", color: "#374151", border: "none", borderRadius: 0, padding: "4px 10px", fontSize: 11, fontWeight: 700, cursor: "pointer" }}>ยกเลิก</button>
@@ -4420,7 +4442,7 @@ const laneMatchForTruck = (truck, detailMapByChannel) => {
 
 const DETAIL_LS_VER = "v2"; // bump when encoding/format changes — forces re-upload
 
-const DetailLoading = ({ masterLane, onDetailChange }) => {
+const DetailLoading = ({ masterLane, queue, onDetailChange }) => {
   // cache แคชไว้ต่อ "วันทำงาน" (คัดตาม cycleDateStr, ตัดรอบ 10:00 น. เดียวกับที่อื่น) —
   // ไม่งั้นถ้ายังไม่มีใครอัปโหลดไฟล์ PO ของวันใหม่ หน้านี้จะดึง localStorage ของเมื่อวานมาโชว์
   // ปนกับของวันนี้แทนที่จะว่างรอไฟล์ใหม่
@@ -4586,6 +4608,26 @@ const DetailLoading = ({ masterLane, onDetailChange }) => {
     return map;
   }, [allDetail, masterLane]);
 
+  // ให้ตรงกับคิว LG: ทะเบียนในไฟล์ PO ที่ไม่ตรงกับคิวที่ LG อัพโหลด (เช่น พิมพ์ทะเบียนผิด
+  // หรือไฟล์ Makro/Lotus/ตลาดสดมีรถที่ไม่เคยอยู่ในคิว) ให้แยกไปเตือนต่างหาก แทนที่จะรวม
+  // เข้ายอดปกติเงียบๆ จนตัวเลขหน้านี้ไม่ตรงกับหน้าคิว/Dashboard
+  const plateNum = s => (String(s).match(/\d+/g) || []).pop() || "";
+  const queuePlateNums = useMemo(() => {
+    const set = new Set();
+    (queue || []).forEach(q => { const n = plateNum(q.plate); if (n) set.add(n); });
+    return set;
+  }, [queue]);
+  const { inQueueMap, outOfQueuePlates } = useMemo(() => {
+    const inQ = {};
+    const outPlates = [];
+    for (const [plate, laneSet] of Object.entries(plateLaneMap)) {
+      const n = plateNum(plate);
+      if (queuePlateNums.size === 0 || (n && queuePlateNums.has(n))) inQ[plate] = laneSet;
+      else outPlates.push(plate);
+    }
+    return { inQueueMap: inQ, outOfQueuePlates: outPlates };
+  }, [plateLaneMap, queuePlateNums]);
+
   return (
     <div style={{ padding: 20 }}>
       <h2 style={{ margin: "0 0 20px", fontSize: 20, fontWeight: 900 }}>📋 Detail Loading</h2>
@@ -4616,12 +4658,12 @@ const DetailLoading = ({ masterLane, onDetailChange }) => {
         ))}
       </div>
 
-      {/* Result table: plate → lanes */}
-      {Object.keys(plateLaneMap).length > 0 && (
+      {/* Result table: plate → lanes (เฉพาะทะเบียนที่ตรงกับคิว LG) */}
+      {Object.keys(inQueueMap).length > 0 && (
         <div style={{ background: "#fff", borderRadius: 0, boxShadow: "0 2px 12px rgba(0,0,0,0.08)", overflow: "hidden" }}>
           <div style={{ padding: "14px 20px", borderBottom: "1px solid #f3f4f6", fontWeight: 700, fontSize: 14 }}>
             📊 สรุป ทะเบียนรถ → ลานโหลด
-            <span style={{ background: "#111", color: "#fff", borderRadius: 0, padding: "2px 8px", fontSize: 11, marginLeft: 8 }}>{Object.keys(plateLaneMap).length} คัน</span>
+            <span style={{ background: "#111", color: "#fff", borderRadius: 0, padding: "2px 8px", fontSize: 11, marginLeft: 8 }}>{Object.keys(inQueueMap).length} คัน</span>
           </div>
           <div style={{ overflowX: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
@@ -4633,7 +4675,7 @@ const DetailLoading = ({ masterLane, onDetailChange }) => {
                 </tr>
               </thead>
               <tbody>
-                {Object.entries(plateLaneMap).map(([plate, plateLanes]) => (
+                {Object.entries(inQueueMap).map(([plate, plateLanes]) => (
                   <tr key={plate} style={{ borderBottom: "1px solid #f3f4f6" }}>
                     <td style={{ padding: "8px 16px", fontWeight: 800, fontFamily: "monospace" }}>{plate}</td>
                     {lanes.map(l => (
@@ -4648,6 +4690,23 @@ const DetailLoading = ({ masterLane, onDetailChange }) => {
                 ))}
               </tbody>
             </table>
+          </div>
+        </div>
+      )}
+
+      {/* เตือนแยกต่างหาก: ทะเบียนที่พบในไฟล์ PO แต่ไม่อยู่ในคิว LG วันนี้ */}
+      {outOfQueuePlates.length > 0 && (
+        <div style={{ background: "#fffbeb", border: "1.5px solid #fde68a", borderRadius: 0, padding: 16, marginTop: 16, color: "#92400e" }}>
+          <div style={{ fontWeight: 800, fontSize: 14 }}>
+            ⚠️ พบทะเบียนนอกคิว {outOfQueuePlates.length} คัน
+          </div>
+          <div style={{ fontSize: 12, marginTop: 4, marginBottom: 8 }}>
+            ทะเบียนเหล่านี้อยู่ในไฟล์ PO (ตลาดสด/Makro/LOTUS) แต่ไม่ตรงกับคิวที่ LG อัปโหลดวันนี้ — ตรวจสอบว่าพิมพ์ทะเบียนผิด หรือ LG ยังไม่ได้ใส่คิวให้รถคันนี้
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+            {outOfQueuePlates.map(p => (
+              <span key={p} style={{ background: "#fef3c7", borderRadius: 0, padding: "3px 8px", fontSize: 12, fontWeight: 700, fontFamily: "monospace" }}>{p}</span>
+            ))}
           </div>
         </div>
       )}
@@ -6076,7 +6135,7 @@ export default function App() {
         {tab === "basket_summary" && <BasketSummary trucks={trucks} />}
         {tab === "waiting_summary" && <WaitingSummary trucks={trucks} />}
         {tab === "qr"        && <QRCodePage />}
-        {tab === "lg"        && <LGUpload queue={queue} onSetQueue={handleSetQueue} />}
+        {tab === "lg"        && <LGUpload queue={queue} trucks={trucks} onSetQueue={handleSetQueue} />}
         {tab === "driver"    && <DriverScan queue={queue} trucks={trucks} onScan={handleScan} skipGeofence />}
         {tab === "picking"   && <Picking trucks={trucks} queue={queue} onUpdate={handleUpdate} detailMapByChannel={detailMapByChannel} />}
         {tab === "qc_parts"  && <QC trucks={trucks} onUpdate={handleUpdate} laneId="lane_parts" detailMapByChannel={detailMapByChannel} onBack={() => setTab(prevTab)} />}
@@ -6092,7 +6151,7 @@ export default function App() {
         {tab === "work_tracking" && <WorkTracking trucks={trucks} queue={queue} detailMapByChannel={detailMapByChannel} masterLane={masterLane} />}
         {tab === "planning"      && <Planning trucks={trucks} queue={queue} onUpdate={handleUpdate} />}
         {tab === "master_upload" && <MasterUpload masterLane={masterLane} onMasterChange={handleMasterChange} />}
-        {tab === "detail_loading" && <DetailLoading masterLane={masterLane} onDetailChange={handleDetailChange} />}
+        {tab === "detail_loading" && <DetailLoading masterLane={masterLane} queue={queue} onDetailChange={handleDetailChange} />}
         {tab === "download"       && <Download onReset={handleReset} />}
         {tab === "admin"          && <Admin trucks={trucks} queue={queue} onUpdate={handleUpdate} onDeleteTruck={handleDeleteTruck} />}
       </div>
