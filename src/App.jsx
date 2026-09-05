@@ -2180,7 +2180,7 @@ const LoadingYard = ({ trucks, onUpdate, laneId, masterLane = [], onBack }) => {
   const curLane = lanes.find(l => l.id === activeLane);
   const form    = forms[activeLane];
   const setBasket = (key, val) => setF(activeLane, { baskets: { ...form.baskets, [key]: val } });
-  const basketTotal = basketTypes.filter(b => b.countsInTotal).reduce((sum, b) => sum + (Number(form.baskets?.[b.key]) || 0), 0);
+  const basketTotal = basketTypes.filter(b => b.countsInTotal).reduce((sum, b) => sum + Math.max(0, Number(form.baskets?.[b.key]) || 0), 0);
   const [basketsOpen, setBasketsOpen] = useState(false);
   const [waitingModal, setWaitingModal] = useState(false);
   const [waitingReasons, setWaitingReasons] = useState([""]);
@@ -2256,7 +2256,7 @@ const LoadingYard = ({ trucks, onUpdate, laneId, masterLane = [], onBack }) => {
       const photos = Array.isArray(form.photo) ? form.photo : (form.photo ? [form.photo] : []);
       const photoUrls = await uploadPhotos(`loading/${activeLane}`, sel.plate, photos);
       const existing = sel.loadLanes?.[activeLane] || {};
-      const baskets = Object.fromEntries(basketTypes.map(b => [b.key, Number(form.baskets?.[b.key]) || 0]));
+      const baskets = Object.fromEntries(basketTypes.map(b => [b.key, Math.max(0, Number(form.baskets?.[b.key]) || 0)]));
       const basketPayer = (form.baskets?.payer || "").trim();
       const loadLanes = { ...(sel.loadLanes || {}), [activeLane]: { ...existing, done: true, photos: photoUrls, note: form.note, doneAt: TIME_NOW(), baskets, basketPayer, bayId: bay?.id || null } };
       await onUpdate(sel.id, { loadLanes });
@@ -2766,7 +2766,7 @@ const BasketSummary = ({ trucks }) => {
     const plate = issued.plate;
     const returned = returnedByPlate[key] || zeroBaskets();
     const out = Object.fromEntries(basketTypes.map(b => [b.key, issued[b.key] - returned[b.key]]));
-    const total = basketTypes.reduce((sum, b) => sum + out[b.key], 0);
+    const total = basketTypes.filter(b => b.countsInTotal).reduce((sum, b) => sum + out[b.key], 0);
     return { plate, out, total };
   }).filter(r => r.total > 0).sort((a, b) => b.total - a.total);
 
@@ -2776,6 +2776,10 @@ const BasketSummary = ({ trucks }) => {
     const plate = returnForm.plate.trim();
     if (!plate) { alert("กรุณากรอกทะเบียนรถ"); return; }
     const counts = Object.fromEntries(basketTypes.map(b => [b.key, Number(returnForm[b.key]) || 0]));
+    if (Object.values(counts).some(v => v < 0)) {
+      alert("จำนวนที่คืนต้องไม่ติดลบ");
+      return;
+    }
     if (!Object.values(counts).some(v => v > 0)) {
       alert("กรุณากรอกจำนวนตะกร้า/ตะขอที่คืนอย่างน้อย 1 ช่อง");
       return;
@@ -5852,8 +5856,12 @@ export default function App() {
   };
 
   const handleUpdate = async (id, upd) => {
-    const truck = trucks.find(t => t.id === id);
-    if (!truck) throw new Error("ไม่พบข้อมูลรถคันนี้ในเครื่อง กรุณารีเฟรชหน้าจอแล้วลองใหม่");
+    // อ่านค่าสดจาก Supabase แทนการใช้ local `trucks` state ที่อาจเก่า — QC/Loading รันแยก
+    // เครื่องต่อลาน (qc_parts/qc_head/qc_pork) ถ้า 2 เครื่องบันทึกใกล้กันมากโดยอ้างอิง
+    // state คนละช่วงเวลา การ merge+upsert ทั้งก้อนจะเขียนทับผลของอีกฝั่งที่เพิ่งบันทึกไปหายไป
+    const { data: row, error: fetchErr } = await supabase.from("wh_trucks").select("data").eq("id", id).single();
+    if (fetchErr || !row) throw new Error("ไม่พบข้อมูลรถคันนี้ กรุณารีเฟรชหน้าจอแล้วลองใหม่");
+    const truck = row.data;
 
     if (upd.loadLanes) {
        for (const lane of Object.keys(upd.loadLanes)) {
