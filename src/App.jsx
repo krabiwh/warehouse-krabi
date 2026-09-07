@@ -2464,6 +2464,22 @@ const workTimeValue = (doneAt) => {
   return (h < settings.workDayCutoffHour ? h + 24 : h) * 60 + m;
 };
 
+// signed minutes between an actual "HH:mm" clock time and its scheduled STD
+// time, taking the shortest path around the 24h clock. Unlike workTimeValue(),
+// this doesn't guess which calendar day each time belongs to from a fixed
+// cutoff hour applied independently to each value — that breaks whenever STD
+// and actual land a few minutes apart but on opposite sides of the cutoff
+// (e.g. STD 10:15 vs actual 09:48 came out ~23h "late" instead of 27min early).
+// Only valid for schedule-deviation checks (actual expected within ~12h of STD);
+// not for elapsed-duration calcs like time-in-factory, which use workTimeValue.
+const timeDiffMins = (actual, std) => {
+  const toMin = s => { const [h, m] = s.split(":").map(Number); return h * 60 + m; };
+  let diff = toMin(actual) - toMin(std);
+  if (diff > 720) diff -= 1440;
+  else if (diff < -720) diff += 1440;
+  return diff;
+};
+
 const buildLaneEvents = (list, sources) => {
   const events = [];
   for (const t of list || []) {
@@ -5282,7 +5298,7 @@ const WorkTracking = ({ trucks, queue, detailMapByChannel = {}, masterLane = [] 
     { id: "entryDelta",       grp: "entry",  label: "เข้าเร็ว/ช้า",   align: "center", get: t => {
       const q = getQ(t);
       if (!q?.entryTime || !t.arrivedAt) return null;
-      return workTimeValue(t.arrivedAt) - workTimeValue(q.entryTime);
+      return timeDiffMins(t.arrivedAt, q.entryTime);
     } },
     { id: "pickingAt",        grp: "entry",  label: "พิมพ์ใบเบิก", align: "center", get: t => t.pickingAt },
     { id: "qc_parts",     grp: "parts", label: "ตรวจอุณหภูมิรถ", align: "center", get: t => t.qcLanes?.lane_parts?.doneAt },
@@ -5300,7 +5316,7 @@ const WorkTracking = ({ trucks, queue, detailMapByChannel = {}, masterLane = [] 
     { id: "exitDelta",        grp: "exit",   label: "ออกเร็ว/ช้า",    align: "center", get: t => {
       const q = getQ(t);
       if (!q?.exitTime || !t.invoicedAt) return null;
-      return workTimeValue(t.invoicedAt) - workTimeValue(q.exitTime);
+      return timeDiffMins(t.invoicedAt, q.exitTime);
     } },
   ];
 
@@ -5343,8 +5359,8 @@ const WorkTracking = ({ trucks, queue, detailMapByChannel = {}, masterLane = [] 
   const exportExcel = () => {
     const rows = sorted.map(t => {
       const q = getQ(t);
-      const entryDiff = q?.entryTime && t.arrivedAt ? workTimeValue(t.arrivedAt) - workTimeValue(q.entryTime) : null;
-      const exitDiff  = q?.exitTime  && t.invoicedAt ? workTimeValue(t.invoicedAt) - workTimeValue(q.exitTime)  : null;
+      const entryDiff = q?.entryTime && t.arrivedAt ? timeDiffMins(t.arrivedAt, q.entryTime) : null;
+      const exitDiff  = q?.exitTime  && t.invoicedAt ? timeDiffMins(t.invoicedAt, q.exitTime)  : null;
       return {
         "ทะเบียน":               t.plate || "",
         "กลุ่มลูกค้า":           t.customerGroup || "",
@@ -5379,13 +5395,13 @@ const WorkTracking = ({ trucks, queue, detailMapByChannel = {}, masterLane = [] 
     const gq = t => queueArr.find(q => q.id === t.queueId) || queueArr.find(q => pNum(q.plate) === pNum(t.plate) && pNum(q.plate) !== "");
     const entered = trucksArr.filter(t => t.arrivedAt);
     const entryDiffs = entered
-      .map(t => { const q = gq(t); return q?.entryTime ? workTimeValue(t.arrivedAt) - workTimeValue(q.entryTime) : null; })
+      .map(t => { const q = gq(t); return q?.entryTime ? timeDiffMins(t.arrivedAt, q.entryTime) : null; })
       .filter(d => d != null);
     const enteredOnTime = entryDiffs.filter(d => d <= 0).length;
 
     const exited = trucksArr.filter(t => t.invoicedAt);
     const exitDiffs = exited
-      .map(t => { const q = gq(t); return q?.exitTime ? workTimeValue(t.invoicedAt) - workTimeValue(q.exitTime) : null; })
+      .map(t => { const q = gq(t); return q?.exitTime ? timeDiffMins(t.invoicedAt, q.exitTime) : null; })
       .filter(d => d != null);
     const exitedOnTime = exitDiffs.filter(d => d <= 0).length;
     const exitedLate = exitDiffs.filter(d => d > 0).length;
@@ -5534,7 +5550,7 @@ const WorkTracking = ({ trucks, queue, detailMapByChannel = {}, masterLane = [] 
               )}
               {visibleRows.map((t, i) => {
                 const q = getQ(t);
-                const stdDiff = q?.entryTime && t.arrivedAt ? workTimeValue(t.arrivedAt) - workTimeValue(q.entryTime) : null;
+                const stdDiff = q?.entryTime && t.arrivedAt ? timeDiffMins(t.arrivedAt, q.entryTime) : null;
                 return (
                   <tr key={t.id} style={{ borderBottom: "1px solid #e5e7eb" }}
                     onMouseEnter={e => e.currentTarget.style.filter = "brightness(0.96)"}
@@ -5588,7 +5604,7 @@ const WorkTracking = ({ trucks, queue, detailMapByChannel = {}, masterLane = [] 
 
                       if (col.id === "exitDelta") {
                         const q = getQ(t);
-                        const exitDiff = q?.exitTime && t.invoicedAt ? workTimeValue(t.invoicedAt) - workTimeValue(q.exitTime) : null;
+                        const exitDiff = q?.exitTime && t.invoicedAt ? timeDiffMins(t.invoicedAt, q.exitTime) : null;
                         const late = exitDiff != null && exitDiff > 0;
                         const early = exitDiff != null && exitDiff < 0;
                         return (
