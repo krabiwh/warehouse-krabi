@@ -503,7 +503,7 @@ const TruckCard = ({ t, children, highlight }) => (
 // ── TIME BAR ──────────────────────────────────────────────────────────────────
 const parseExitDatetime = (dateStr, timeStr) => {
   if (!timeStr) return null;
-  const timeParts = timeStr.split(":");
+  const timeParts = timeStr.split(/[:.]/);
   const h = parseInt(timeParts[0], 10);
   const min = parseInt(timeParts[1], 10);
   if (isNaN(h) || isNaN(min)) return null;
@@ -889,7 +889,7 @@ const Dashboard = ({ trucks, queue, onReset, lane, detailMap, title, myPlate, si
   ];
 
   const plateNum = s => (String(s).match(/\d+/g) || []).pop() || "";
-  const toMins = t => { const [h, m] = t.split(":").map(Number); return h * 60 + m; };
+  const toMins = t => { const [h, m] = t.split(/[:.]/).map(Number); return h * 60 + m; };
   const nowMins = new Date().getHours() * 60 + new Date().getMinutes();
   const getRemMins = (row) => {
     const dt = parseExitDatetime(row.date, row.exitTime);
@@ -1025,12 +1025,24 @@ const toDateStr = (val) => {
   return String(val).trim();
 };
 
+// "22.30" / "9:5" / " 02:30 " → "22:30" / "09:05" / "02:30" — ค่าอื่นคืนตามเดิม
+const normTime = (s) => {
+  const m = String(s ?? "").trim().match(/^(\d{1,2})[:.](\d{1,2})$/);
+  return m ? `${m[1].padStart(2, "0")}:${m[2].padStart(2, "0")}` : (s ?? "");
+};
+
+// เวลาที่กรอกเองต้องเป็น HH:MM (00:00–23:59) หรือเว้นว่าง — คืนข้อความเตือน หรือ null ถ้าผ่าน
+const timeInputError = (label, s) => {
+  if (!String(s ?? "").trim()) return null;
+  return /^([01]\d|2[0-3]):[0-5]\d$/.test(normTime(s)) ? null : `${label} "${s}" ไม่ถูกต้อง — กรุณากรอกเป็น HH:MM เช่น 22:30`;
+};
+
 const toHHMM = (val) => {
   if (val === "" || val == null) return "";
   // string containing a time — either bare "17:00[:00]" or a full "16/08/2569 17:00:00" datetime
   if (typeof val === "string") {
     const trimmed = val.trim();
-    const m = trimmed.match(/(\d{1,2}):(\d{2})(?::\d{2})?/);
+    const m = trimmed.match(/(\d{1,2})[:.](\d{2})(?::\d{2})?/);
     if (m) return `${m[1].padStart(2, "0")}:${m[2]}`;
     if (trimmed.includes("/")) return ""; // date-only string (no time part) — don't misread as a serial number
   }
@@ -1049,7 +1061,7 @@ const toHHMM = (val) => {
 // ถ้า exitTime อยู่ก่อนเวลาตัดรอบวันทำงาน (settings.workDayCutoffHour) → วันที่จริงคือ dateStr + 1 (กะข้ามคืน)
 const displayDate = (dateStr, exitTime) => {
   if (!dateStr || !exitTime) return dateStr || "";
-  const [hStr, minStr] = exitTime.split(":");
+  const [hStr, minStr] = exitTime.split(/[:.]/);
   const h = parseInt(hStr, 10); const min = parseInt(minStr, 10);
   if (isNaN(h) || isNaN(min) || h * 60 + min >= settings.workDayCutoffHour * 60) return dateStr;
   const parts = dateStr.split("/");
@@ -1079,9 +1091,12 @@ const LGUpload = ({ queue, trucks, onSetQueue }) => {
   const startEdit = (q) => { setEditId(q.id); setEditData({ plate: q.plate, customerGroup: q.customerGroup, zone: q.zone || "", entryTime: q.entryTime, exitTime: q.exitTime }); };
   const cancelEdit = () => { setEditId(null); setEditData({}); };
   const saveEdit = async () => {
+    const err = timeInputError("เวลาเข้า", editData.entryTime) || timeInputError("เวลาออก", editData.exitTime);
+    if (err) { alert(err); return; }
     setQueueSaving(true);
     try {
-      await onSetQueue(queue.map(q => q.id === editId ? { ...q, ...editData, zone: editData.zone, time: editData.entryTime } : q));
+      const entryTime = normTime(editData.entryTime), exitTime = normTime(editData.exitTime);
+      await onSetQueue(queue.map(q => q.id === editId ? { ...q, ...editData, entryTime, exitTime, zone: editData.zone, time: entryTime } : q));
       setEditId(null); setEditData({});
     } catch (e) {
       alert("บันทึกไม่สำเร็จ: " + e.message);
@@ -1102,9 +1117,12 @@ const LGUpload = ({ queue, trucks, onSetQueue }) => {
   };
   const saveManual = async () => {
     if (!manualData.plate) return;
+    const err = timeInputError("เวลาเข้า", manualData.entryTime) || timeInputError("เวลาออก", manualData.exitTime);
+    if (err) { alert(err); return; }
     setQueueSaving(true);
     try {
-      await onSetQueue([...queue, { id: `M${Date.now()}`, ...manualData, date: manualData.date || SHORT_DATE(), time: manualData.entryTime, driver: "", zone: manualData.zone || "", product: "", destination: "", qty: 0, unit: "กก.", loadTime: "" }]);
+      const entryTime = normTime(manualData.entryTime), exitTime = normTime(manualData.exitTime);
+      await onSetQueue([...queue, { id: `M${Date.now()}`, ...manualData, entryTime, exitTime, date: manualData.date || SHORT_DATE(), time: entryTime, driver: "", zone: manualData.zone || "", product: "", destination: "", qty: 0, unit: "กก.", loadTime: "" }]);
       setManualData({ date: "", plate: "", customerGroup: "", zone: "", entryTime: "", exitTime: "" });
       setAddingManual(false);
     } catch (e) {
@@ -2473,8 +2491,9 @@ const workTimeValue = (doneAt) => {
 // Only valid for schedule-deviation checks (actual expected within ~12h of STD);
 // not for elapsed-duration calcs like time-in-factory, which use workTimeValue.
 const timeDiffMins = (actual, std) => {
-  const toMin = s => { const [h, m] = s.split(":").map(Number); return h * 60 + m; };
+  const toMin = s => { const [h, m] = s.split(/[:.]/).map(Number); return h * 60 + m; };
   let diff = toMin(actual) - toMin(std);
+  if (isNaN(diff)) return null;
   if (diff > 720) diff -= 1440;
   else if (diff < -720) diff += 1440;
   return diff;
@@ -5293,7 +5312,7 @@ const WorkTracking = ({ trucks, queue, detailMapByChannel = {}, masterLane = [] 
   const COLS = [
     { id: "plate",            grp: "info",   label: "ทะเบียน",    align: "left",   get: t => t.plate },
     { id: "customerGroup",    grp: "info",   label: "กลุ่มลูกค้า", align: "left",   get: t => t.customerGroup || "—" },
-    { id: "entrySTD",         grp: "entry",  label: "STD เข้า",   align: "center", get: t => getQ(t)?.entryTime },
+    { id: "entrySTD",         grp: "entry",  label: "STD เข้า",   align: "center", get: t => normTime(getQ(t)?.entryTime) },
     { id: "arrivedAt",        grp: "entry",  label: "ACT เข้า",   align: "center", get: t => t.arrivedAt },
     { id: "entryDelta",       grp: "entry",  label: "เข้าเร็ว/ช้า",   align: "center", get: t => {
       const q = getQ(t);
@@ -5312,7 +5331,7 @@ const WorkTracking = ({ trucks, queue, detailMapByChannel = {}, masterLane = [] 
     { id: "load_pork",    grp: "pork",  label: "โหลดเสร็จ",      align: "center", get: t => t.loadLanes?.lane_pork?.doneAt },
     { id: "summaryPrintedAt", grp: "docs",   label: "ใบสรุป",         align: "center", get: t => t.summaryPrintedAt },
     { id: "invoicedAt",       grp: "docs",   label: "Invoice",         align: "center", get: t => t.invoicedAt },
-    { id: "exitSTD",          grp: "exit",   label: "STD ออก",         align: "center", get: t => getQ(t)?.exitTime },
+    { id: "exitSTD",          grp: "exit",   label: "STD ออก",         align: "center", get: t => normTime(getQ(t)?.exitTime) },
     { id: "exitDelta",        grp: "exit",   label: "ออกเร็ว/ช้า",    align: "center", get: t => {
       const q = getQ(t);
       if (!q?.exitTime || !t.invoicedAt) return null;
@@ -5833,8 +5852,8 @@ export default function App() {
 
   const calcTimeDiffStr = (std, actual) => {
     if (!std || !actual) return "";
-    const [h1, m1] = std.split(":").map(Number);
-    const [h2, m2] = actual.split(":").map(Number);
+    const [h1, m1] = std.split(/[:.]/).map(Number);
+    const [h2, m2] = actual.split(/[:.]/).map(Number);
     if (isNaN(h1) || isNaN(h2)) return "";
     const diffMin = (h2 * 60 + m2) - (h1 * 60 + m1);
     if (diffMin === 0) return "(ตรงเวลา)";
