@@ -360,7 +360,7 @@ export async function deleteBay(id) {
 const DEFAULT_ROLES = [
   { id: "qc",            label: "ลานโหลด",             emoji: "🌡️", sortOrder: 1 },
   { id: "checker",        label: "QC",                  emoji: "🥩", sortOrder: 2 },
-  { id: "loading",        label: "Checker",             img: "/basket.png", sortOrder: 3 },
+  { id: "loading",        label: "Checker",             emoji: "🧺", sortOrder: 3 },
   { id: "office_wh",      label: "Office คลัง",          emoji: "🖨️", sortOrder: 4 },
   { id: "office_plan",    label: "Office วางแผน",        emoji: "🧾", sortOrder: 5 },
   { id: "lg",             label: "LG",                  emoji: "⬆️", sortOrder: 6 },
