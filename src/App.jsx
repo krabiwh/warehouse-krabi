@@ -1467,6 +1467,7 @@ const DriverScan = ({ queue, trucks, onScan, skipGeofence }) => {
   const [plate, setPlate] = useState("");
   const [step, setStep] = useState("input"); // "input" | "confirm"
   const [pendingEntry, setPendingEntry] = useState(null);
+  const [plateOptions, setPlateOptions] = useState([]); // ทะเบียนที่เลขซ้ำกัน ให้คนขับเลือก
   const [selectedZone, setSelectedZone] = useState("");
   const [msg, setMsg] = useState(null);
   const geo = useGeofence();
@@ -1537,40 +1538,85 @@ const DriverScan = ({ queue, trucks, onScan, skipGeofence }) => {
 
   const plateNum = s => (String(s).match(/\d+/g) || []).pop() || "";
   const matchPlate = (a, b) => plateNum(a) === plateNum(b) && plateNum(a) !== "";
+  const plateKey = s => String(s).replace(/[\s-]/g, "").toUpperCase();
 
   const handleSearch = () => {
     const p = plate.trim();
     if (!p) return;
     const queueEntries = queue.filter(q => matchPlate(q.plate, p));
     const usedIds = new Set(trucks.map(t => t.queueId).filter(Boolean));
-    const nextEntry = queueEntries.find(q => !usedIds.has(q.id));
-    if (queueEntries.length > 0 && !nextEntry) {
+    // เลขเดียวกันอาจเป็นคนละทะเบียน (ตัวอักษรต่างกัน) → เอา trip ถัดไปที่ยังไม่เช็คอินของแต่ละทะเบียน
+    // ทะเบียนที่เช็คอินครบแล้วยังแสดงให้เห็น (กดไม่ได้) กันคนขับอีกคันโดนเลือกให้อัตโนมัติ
+    const byPlate = new Map();
+    queueEntries.forEach(q => {
+      const key = plateKey(q.plate);
+      const cur = byPlate.get(key);
+      if (!usedIds.has(q.id)) { if (!cur || cur.done) byPlate.set(key, { ...q, done: false }); }
+      else if (!cur) byPlate.set(key, { ...q, done: true });
+    });
+    const allPlates = [...byPlate.values()];
+    const options = allPlates.filter(o => !o.done);
+    if (queueEntries.length > 0 && options.length === 0) {
       setMsg({ t: "warn", text: "⚠️ รถคันนี้เช็คอินครบทุก trip แล้ว" }); return;
     }
-    const entry = nextEntry || { id: `WALK-${Date.now()}`, plate: p, driver: "", customerGroup: "", zone: "", product: "", destination: "", qty: 0, unit: "กก.", time: TIME_NOW(), entryTime: TIME_NOW(), loadTime: "", exitTime: "" };
+    setMsg(null);
+    setStep("confirm");
+    if (allPlates.length > 1) {
+      setPlateOptions(allPlates);
+      setPendingEntry(null);
+      setSelectedZone("");
+      return;
+    }
+    const entry = options[0] || { id: `WALK-${Date.now()}`, plate: p, driver: "", customerGroup: "", zone: "", product: "", destination: "", qty: 0, unit: "กก.", time: TIME_NOW(), entryTime: TIME_NOW(), loadTime: "", exitTime: "" };
+    setPlateOptions([]);
     setPendingEntry(entry);
     setSelectedZone(entry.zone || "");
-    setStep("confirm");
-    setMsg(null);
+  };
+
+  const choosePlate = entry => {
+    setPendingEntry(entry);
+    setSelectedZone(entry.zone || "");
   };
 
   const handleConfirm = () => {
-    onScan({ ...pendingEntry, zone: selectedZone, status: "arrived", arrivedAt: TIME_NOW(), queueId: pendingEntry.id, pickupPrinted: false, summaryPrinted: false });
+    const { done: _done, ...entry } = pendingEntry;
+    onScan({ ...entry, zone: selectedZone, status: "arrived", arrivedAt: TIME_NOW(), queueId: pendingEntry.id, pickupPrinted: false, summaryPrinted: false });
     const isWalkIn = pendingEntry.id.startsWith("WALK-");
     setMsg({ t: isWalkIn ? "walk" : "ok", text: `✅ เช็คอินสำเร็จ! ${pendingEntry.plate}${selectedZone ? ` — ${selectedZone}` : ""}` });
-    setPlate(""); setPendingEntry(null); setSelectedZone(""); setStep("input");
+    setPlate(""); setPendingEntry(null); setPlateOptions([]); setSelectedZone(""); setStep("input");
   };
 
-  if (step === "confirm" && pendingEntry) return (
+  if (step === "confirm" && (pendingEntry || plateOptions.length > 1)) return (
     <div>
       <h2 style={{ margin: "0 0 6px", fontWeight: 900, fontSize: 22 }}>🚛 ยืนยันการเช็คอิน</h2>
-      <p style={{ margin: "0 0 18px", color: "#6b7280", fontSize: 13 }}>ตรวจสอบข้อมูลแล้วกดยืนยัน</p>
+      <p style={{ margin: "0 0 18px", color: "#6b7280", fontSize: 13 }}>
+        {plateOptions.length > 1 ? "พบหลายทะเบียนที่เลขตรงกัน — กรุณาเลือกทะเบียนรถของท่าน" : "ตรวจสอบข้อมูลแล้วกดยืนยัน"}
+      </p>
       <div style={{ background: "#fff", borderRadius: 0, padding: 24, boxShadow: "0 2px 12px rgba(0,0,0,0.08)", marginBottom: 16 }}>
-        <div style={{ background: "#f9fafb", borderRadius: 0, padding: "16px 20px", marginBottom: 20 }}>
-          <div style={{ fontSize: 28, fontWeight: 900, letterSpacing: 2, marginBottom: 4 }}>{pendingEntry.plate}</div>
-          {pendingEntry.customerGroup && <div style={{ fontSize: 13, color: "#6b7280", fontWeight: 600 }}>กลุ่มลูกค้า: {pendingEntry.customerGroup}</div>}
-        </div>
-        {selectedZone && (
+        {plateOptions.length > 1 ? (
+          <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 20 }}>
+            {plateOptions.map(o => {
+              const active = pendingEntry?.id === o.id;
+              return (
+                <button key={o.id} onClick={() => !o.done && choosePlate(o)} disabled={o.done}
+                  style={{ textAlign: "left", background: active ? "#111" : "#f9fafb", color: active ? "#fff" : "#111", border: `2px solid ${active ? "#111" : "#e5e7eb"}`, borderRadius: 0, padding: "14px 18px", cursor: o.done ? "not-allowed" : "pointer", opacity: o.done ? 0.5 : 1 }}>
+                  <div style={{ fontSize: 24, fontWeight: 900, letterSpacing: 2 }}>
+                    {active ? "● " : "○ "}{o.plate}
+                    {o.done && <span style={{ fontSize: 13, fontWeight: 700, letterSpacing: 0, marginLeft: 10, color: "#059669" }}>✓ เช็คอินครบแล้ว</span>}
+                  </div>
+                  {o.customerGroup && <div style={{ fontSize: 13, fontWeight: 600, color: active ? "#d1d5db" : "#6b7280", marginTop: 2 }}>กลุ่มลูกค้า: {o.customerGroup}</div>}
+                  {o.zone && <div style={{ fontSize: 13, fontWeight: 600, color: active ? "#c4b5fd" : "#7c3aed", marginTop: 2 }}>📍 {o.zone}</div>}
+                </button>
+              );
+            })}
+          </div>
+        ) : (
+          <div style={{ background: "#f9fafb", borderRadius: 0, padding: "16px 20px", marginBottom: 20 }}>
+            <div style={{ fontSize: 28, fontWeight: 900, letterSpacing: 2, marginBottom: 4 }}>{pendingEntry.plate}</div>
+            {pendingEntry.customerGroup && <div style={{ fontSize: 13, color: "#6b7280", fontWeight: 600 }}>กลุ่มลูกค้า: {pendingEntry.customerGroup}</div>}
+          </div>
+        )}
+        {plateOptions.length <= 1 && selectedZone && (
           <div style={{ marginBottom: 16 }}>
             <label style={{ display: "block", fontWeight: 700, fontSize: 14, marginBottom: 8 }}>📍 Zone</label>
             <div style={{ width: "100%", border: "2px solid #e5e7eb", borderRadius: 0, padding: "12px 14px", fontSize: 16, fontWeight: 700, boxSizing: "border-box", background: "#f9fafb", color: "#7c3aed" }}>
@@ -1578,11 +1624,11 @@ const DriverScan = ({ queue, trucks, onScan, skipGeofence }) => {
             </div>
           </div>
         )}
-        <button onClick={handleConfirm}
-          style={{ width: "100%", background: "#111", color: "#fff", border: "none", borderRadius: 0, padding: "14px 0", fontSize: 16, fontWeight: 700, cursor: "pointer", marginBottom: 10 }}>
+        <button onClick={handleConfirm} disabled={!pendingEntry}
+          style={{ width: "100%", background: pendingEntry ? "#111" : "#9ca3af", color: "#fff", border: "none", borderRadius: 0, padding: "14px 0", fontSize: 16, fontWeight: 700, cursor: pendingEntry ? "pointer" : "not-allowed", marginBottom: 10 }}>
           ✅ ยืนยันเช็คอิน
         </button>
-        <button onClick={() => { setStep("input"); setMsg(null); }}
+        <button onClick={() => { setStep("input"); setMsg(null); setPendingEntry(null); setPlateOptions([]); }}
           style={{ width: "100%", background: "#f3f4f6", color: "#374151", border: "none", borderRadius: 0, padding: "12px 0", fontSize: 14, fontWeight: 600, cursor: "pointer" }}>
           ← กลับ
         </button>
