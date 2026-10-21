@@ -23,7 +23,7 @@ import * as XLSX from "xlsx";
 import { supabase } from "./lib/supabase";
 import { uploadToR2 } from "./lib/r2";
 import { sendTeamsNotification } from "./utils/teams";
-import { settings, saveSetting } from "./lib/settings";
+import { settings, saveSetting, minutesToHHMM, hhmmToMinutes } from "./lib/settings";
 import {
   laneAliases, saveLaneAlias, deleteLaneAlias,
   waitingReasons as waitingReasonPresets, addWaitingReason, deleteWaitingReason,
@@ -65,10 +65,10 @@ const FLOW_STEPS = [
 const TODAY = new Date().toLocaleDateString("th-TH", { year: "numeric", month: "long", day: "numeric" });
 // รูปแบบ D/M/YYYY (ไม่ padStart) ให้ตรงกับที่ parseQueueDateToISO/toDateStr ฝั่งอ่านคาดหวัง
 // ก่อนหน้านี้เป็น const คำนวณครั้งเดียวตอนโหลดโมดูล ไม่มี cutoff เลย (ต่างจาก DATE_STR/
-// cycleDateStr) — เปลี่ยนเป็นฟังก์ชันที่ตัดรอบด้วย settings.workDayCutoffHour เดียวกัน
+// cycleDateStr) — เปลี่ยนเป็นฟังก์ชันที่ตัดรอบด้วย settings.workDayCutoffMinutes เดียวกัน
 const SHORT_DATE = () => {
   const d = new Date();
-  if (d.getHours() < settings.workDayCutoffHour) d.setDate(d.getDate() - 1);
+  if (d.getHours() * 60 + d.getMinutes() < settings.workDayCutoffMinutes) d.setDate(d.getDate() - 1);
   return `${d.getDate()}/${d.getMonth() + 1}/${d.getFullYear()}`;
 };
 const TIME_NOW = () => new Date().toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" });
@@ -76,7 +76,7 @@ const getStep = (status) => STATUS_META[status]?.step ?? 0;
 
 const DATE_STR = () => {
   const d = new Date();
-  if (d.getHours() < settings.workDayCutoffHour) d.setDate(d.getDate() - 1);
+  if (d.getHours() * 60 + d.getMinutes() < settings.workDayCutoffMinutes) d.setDate(d.getDate() - 1);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 };
 const safePlate = p => String(p).replace(/[^a-zA-Z0-9]/g, "") || "unknown";
@@ -516,13 +516,13 @@ const parseExitDatetime = (dateStr, timeStr) => {
     if (year > 2400) year -= 543;
     if (!isNaN(day) && !isNaN(month) && !isNaN(year)) {
       const d = new Date(year, month - 1, day, h, min, 0, 0);
-      if (h * 60 + min < settings.workDayCutoffHour * 60) d.setDate(d.getDate() + 1);
+      if (h * 60 + min < settings.workDayCutoffMinutes) d.setDate(d.getDate() + 1);
       return d;
     }
   }
   // ไม่มี date → fallback วันนี้ + ปรับข้ามคืน
   const d = new Date(); d.setHours(h, min, 0, 0);
-  if (h * 60 + min < settings.workDayCutoffHour * 60) d.setDate(d.getDate() + 1);
+  if (h * 60 + min < settings.workDayCutoffMinutes) d.setDate(d.getDate() + 1);
   return d;
 };
 
@@ -1058,12 +1058,12 @@ const toHHMM = (val) => {
   return String(val);
 };
 
-// ถ้า exitTime อยู่ก่อนเวลาตัดรอบวันทำงาน (settings.workDayCutoffHour) → วันที่จริงคือ dateStr + 1 (กะข้ามคืน)
+// ถ้า exitTime อยู่ก่อนเวลาตัดรอบวันทำงาน (settings.workDayCutoffMinutes) → วันที่จริงคือ dateStr + 1 (กะข้ามคืน)
 const displayDate = (dateStr, exitTime) => {
   if (!dateStr || !exitTime) return dateStr || "";
   const [hStr, minStr] = exitTime.split(/[:.]/);
   const h = parseInt(hStr, 10); const min = parseInt(minStr, 10);
-  if (isNaN(h) || isNaN(min) || h * 60 + min >= settings.workDayCutoffHour * 60) return dateStr;
+  if (isNaN(h) || isNaN(min) || h * 60 + min >= settings.workDayCutoffMinutes) return dateStr;
   const parts = dateStr.split("/");
   if (parts.length !== 3) return dateStr;
   let [d, m, y] = parts.map(Number);
@@ -2449,15 +2449,15 @@ const LoadingYard = ({ trucks, onUpdate, laneId, masterLane = [], onBack }) => {
 };
 
 // ── 6.5 LOADING LOG (chat-style feed of completed loads) ─────────────────────
-// the work-day rolls over at settings.workDayCutoffHour, not midnight — must stay
+// the work-day rolls over at settings.workDayCutoffMinutes (minutes since midnight), not midnight — must stay
 // in sync everywhere a "which work-day does this belong to" decision is made
 // (cycleDateStr, handleReset's archive-date calc, DATE_STR, SHORT_DATE,
 // parseExitDatetime, displayDate), otherwise a time/date can get filed under the
 // wrong work-day in one place but not another. All of those now read the same
-// settings.workDayCutoffHour value instead of each hardcoding their own hour.
+// settings.workDayCutoffMinutes value instead of each hardcoding their own cutoff.
 const cycleDateStr = () => {
   const d = new Date();
-  if (d.getHours() < settings.workDayCutoffHour) d.setDate(d.getDate() - 1);
+  if (d.getHours() * 60 + d.getMinutes() < settings.workDayCutoffMinutes) d.setDate(d.getDate() - 1);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 };
 
@@ -2465,8 +2465,8 @@ const cycleDateStr = () => {
 // *next* calendar date (truck loaded after midnight, e.g. 00:14, still files under
 // the previous work-day) — show that real date next to the time so it's not confusing.
 const formatLogTime = (doneAt, workDate) => {
-  const hour = parseInt(doneAt.split(":")[0], 10);
-  if (hour >= settings.workDayCutoffHour) return doneAt;
+  const [hour, minute] = doneAt.split(":").map(s => parseInt(s, 10));
+  if (hour * 60 + (minute || 0) >= settings.workDayCutoffMinutes) return doneAt;
   const [y, m, d] = workDate.split("-").map(Number);
   const realDate = new Date(y, m - 1, d + 1);
   const dd = String(realDate.getDate()).padStart(2, "0");
@@ -2479,7 +2479,8 @@ const formatLogTime = (doneAt, workDate) => {
 // sort after evening times of the same work-day (e.g. 18:00 < 00:14 next day).
 const workTimeValue = (doneAt) => {
   const [h, m] = doneAt.split(":").map(Number);
-  return (h < settings.workDayCutoffHour ? h + 24 : h) * 60 + m;
+  const t = h * 60 + m;
+  return t < settings.workDayCutoffMinutes ? t + 24 * 60 : t;
 };
 
 // signed minutes between an actual "HH:mm" clock time and its scheduled STD
@@ -3428,7 +3429,7 @@ const Collapsible = ({ title, defaultOpen = false, children }) => {
 // ─────────────────────────────────────────────────────────────────────────────
 const SystemSettings = () => {
   const [form, setForm] = useState({
-    workDayCutoffHour:    settings.workDayCutoffHour,
+    workDayCutoff:        minutesToHHMM(settings.workDayCutoffMinutes),
     waitingUrgentMinutes: settings.waitingUrgentMinutes,
     maxPhotoUploads:      settings.maxPhotoUploads,
     maxWaitingReasons:    settings.maxWaitingReasons,
@@ -3451,8 +3452,8 @@ const SystemSettings = () => {
   // saveSetting เขียนลง DB ไปแล้วแต่ SETTERS ปฏิเสธเงียบๆ ไม่ update ค่าใน memory เลย
   const validate = () => {
     const n = v => Number(v);
-    if (!Number.isFinite(n(form.workDayCutoffHour)) || n(form.workDayCutoffHour) < 0 || n(form.workDayCutoffHour) >= 24)
-      return "เวลาตัดรอบวันทำงานต้องเป็นตัวเลข 0-23";
+    if (hhmmToMinutes(form.workDayCutoff) === null)
+      return "เวลาตัดรอบวันทำงานต้องอยู่ในรูปแบบ HH:mm (00:00-23:59)";
     if (!Number.isFinite(n(form.waitingUrgentMinutes)) || n(form.waitingUrgentMinutes) <= 0)
       return "นาทีที่ถึงจะขึ้น urgent ต้องมากกว่า 0";
     if (!Number.isFinite(n(form.maxPhotoUploads)) || n(form.maxPhotoUploads) < 1 || n(form.maxPhotoUploads) > 15)
@@ -3481,7 +3482,7 @@ const SystemSettings = () => {
     setMsg("");
     try {
       await Promise.all([
-        saveSetting("work_day_cutoff_hour",   Number(form.workDayCutoffHour)),
+        saveSetting("work_day_cutoff_minutes", hhmmToMinutes(form.workDayCutoff)),
         saveSetting("waiting_urgent_minutes", Number(form.waitingUrgentMinutes)),
         saveSetting("max_photo_uploads",      Number(form.maxPhotoUploads)),
         saveSetting("max_waiting_reasons",    Number(form.maxWaitingReasons)),
@@ -3507,8 +3508,9 @@ const SystemSettings = () => {
     <Collapsible title="⚙️ ตั้งค่าระบบ">
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
         <div>
-          <label style={lbl}>เวลาตัดรอบวันทำงาน (0-23)</label>
-          <input type="number" min="0" max="23" value={form.workDayCutoffHour} onChange={set("workDayCutoffHour")} style={inp} />
+          <label style={lbl}>เวลาตัดรอบวันทำงาน (HH:mm)</label>
+          <input type="time" value={form.workDayCutoff} onChange={set("workDayCutoff")} style={inp} />
+          <div style={{ fontSize: 11, color: "#6b7280", marginTop: 4 }}>ระบบจะปิดวัน (archive + ล้างข้อมูล) อัตโนมัติตามเวลานี้</div>
         </div>
         <div>
           <label style={lbl}>รอเกินกี่นาทีถึงขึ้น "urgent"</label>
@@ -4504,7 +4506,7 @@ const laneMatchForTruck = (truck, detailMapByChannel) => {
 const DETAIL_LS_VER = "v2"; // bump when encoding/format changes — forces re-upload
 
 const DetailLoading = ({ masterLane, queue, detailMapByChannel, onDetailChange }) => {
-  // cache แคชไว้ต่อ "วันทำงาน" (คัดตาม cycleDateStr, ตัดรอบ 10:00 น. เดียวกับที่อื่น) —
+  // cache แคชไว้ต่อ "วันทำงาน" (คัดตาม cycleDateStr, ตัดรอบตาม settings.workDayCutoffMinutes เดียวกับที่อื่น) —
   // ไม่งั้นถ้ายังไม่มีใครอัปโหลดไฟล์ PO ของวันใหม่ หน้านี้จะดึง localStorage ของเมื่อวานมาโชว์
   // ปนกับของวันนี้แทนที่จะว่างรอไฟล์ใหม่
   const markDetailCacheFresh = () => { try { localStorage.setItem("wh_detail_date", cycleDateStr()); } catch {} };
@@ -5445,7 +5447,7 @@ const WorkTracking = ({ trucks, queue, detailMapByChannel = {}, masterLane = [] 
 
   // แบ่งวันทำงาน (24 ชม. นับจากเวลาตัดรอบ) เป็น 8 ช่วง ๆ ละ 3 ชม. สำหรับ mini bar chart
   const bucketize = (items, timeFn, valueFn = null, buckets = 8) => {
-    const startMin = settings.workDayCutoffHour * 60;
+    const startMin = settings.workDayCutoffMinutes;
     const bucketMin = (24 * 60) / buckets;
     const sums = Array(buckets).fill(0);
     const counts = Array(buckets).fill(0);

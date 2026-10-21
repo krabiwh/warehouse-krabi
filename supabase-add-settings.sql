@@ -3,8 +3,8 @@
 -- รันสคริปต์นี้ครั้งเดียวใน Supabase SQL Editor ของ project จริง
 --
 -- key ที่แอปรู้จัก (ดู src/lib/settings.js):
---   work_day_cutoff_hour   number  ชั่วโมงตัดรอบวันทำงาน (เดิมมี 3 ค่าไม่ตรงกันใน
---                                  โค้ด: 9 / 10 / ไม่มี cutoff — รวมเป็นค่าเดียวแล้ว)
+--   work_day_cutoff_minutes number เวลาตัดรอบวันทำงาน เป็นนาทีนับจากเที่ยงคืน (450 = 07:30)
+--                                  (แทน work_day_cutoff_hour เดิมที่ตั้งได้แค่ชั่วโมงเต็ม)
 --   waiting_urgent_minutes number  รอเกินกี่นาทีถึงจะขึ้นเตือน "urgent" สีแดง
 --   max_photo_uploads      number  จำนวนรูปสูงสุดต่อครั้งที่แนบได้
 --   max_waiting_reasons    number  จำนวนเหตุผลรอสินค้าสูงสุดต่อครั้ง
